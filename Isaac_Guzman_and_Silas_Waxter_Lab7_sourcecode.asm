@@ -2,7 +2,7 @@
 ; Lab7.asm
 ;
 ; Created: 11/16/2022 2:24:24 PM
-; Author : Isaac
+; Author : Isaac Guzman & Silas Waxter
 ;
 
 
