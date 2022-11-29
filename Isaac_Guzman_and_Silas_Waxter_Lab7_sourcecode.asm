@@ -20,7 +20,7 @@
 
 ; Holds the game state of both players.
 .def remote_game_state_r = r23
-.def local_game_state_r = r24		; only tracks rock, paper, scissor moves
+.def local_game_state_r = r24
 .equ game_state_ready_bit = 4
 .equ game_state_rock_bit = 1
 .equ game_state_paper_bit = 2
@@ -96,6 +96,17 @@
 
 	pop mpr
 .endmacro
+;***********************************************************
+;*  Start of Code Segment
+;***********************************************************
+.cseg
+
+;***********************************************************
+;*  Interrupt Vectors
+;***********************************************************
+.org $0000
+	rjmp init
+.org $0056						; End of Interrupt Vectors
 
 
 init:
@@ -145,6 +156,10 @@ init:
 	clr local_game_state_r
 	clr remote_game_state_r
 
+	; <<< DELETE ME ONCE TESTING IS COMPLETE
+	ldi remote_game_state_r, (1<<game_state_paper_bit)
+	; <<< DELETE ME ONCE TESTING IS COMPLETE
+
 	; Initialize USART1
 	;-----
 
@@ -160,13 +175,12 @@ main:
 
 	rcall start_state
 
-	; show move choices for both players
+	rcall player_choice_state
 
-	; display winner
+	;rcall outcome_state
 
 	rcall LCDClr
-	temp:
-	rjmp temp
+	rjmp main
 
 ; displays welcome message and blocks until button is pressed
 welcome_state:
@@ -182,6 +196,7 @@ welcome_state:
 		sbic button_pinx, button_ready_bit
 		rjmp welcome_state_await_button_press
 	
+	ldi local_game_state_r, (1<<game_state_ready_bit)
 	pop mpr
 	ret
 
@@ -195,9 +210,8 @@ wait_state:
 	rcall LCDWrite
 
 	; block until receive opponenet ready message
-	ldi mpr, game_state_ready_bit
 	wait_state_await_remote_ready:
-		cp remote_game_state_r, mpr
+		cpi remote_game_state_r, game_state_ready_bit
 		; TODO: send ready message to remote using UART Transmitt
 		; <<< DELETE ME ONCE UART ISR IMPLEMENTED
 		sbic button_pinx, button_test1_bit
@@ -258,13 +272,50 @@ start_state:
 			rjmp start_state_finished_move_change
 
 		start_state_finished_move_change:
-			; <<< DELETE ME ONCE UART ISR IMPLEMENTED
+			; TODO: transmit chosen move over UART
+			; <<< DELETE ME ONCE TIMER IMPLEMENTED
 			sbic button_pinx, button_test2_bit
-			; <<< DELETE ME ONCE UART ISR IMPLEMENTED
+			; <<< DELETE ME ONCE TIMER IMPLEMENTED
 			rjmp start_state_await_timer_expire
+
 	pop XH
 	pop XL
 	pop mpr
+	ret
+
+player_choice_state:
+	; conditional display of move based on remote's move choice
+	cpi remote_game_state_r, 1<<game_state_rock_bit
+	breq player_choice_state_display_remote_rock
+	cpi remote_game_state_r, 1<<game_state_paper_bit
+	breq player_choice_state_display_remote_paper
+	cpi remote_game_state_r, 1<<game_state_scissors_bit
+	breq player_choice_state_display_remote_scissors
+
+	;if execution reaches here, remote's move choice does not match move options: ERROR
+	const_copy_prog_to_data_16 16, ERROR_NO_MOVE_STRING, lcd_buffer_address_start_line_1
+	rcall LCDWrite
+	rjmp player_choice_state_await_timer_expire
+
+	player_choice_state_display_remote_rock:
+		const_copy_prog_to_data_16 16, ROCK_STRING, lcd_buffer_address_start_line_1
+		rcall LCDWrite
+		rjmp player_choice_state_await_timer_expire
+	player_choice_state_display_remote_paper:
+		const_copy_prog_to_data_16 16, PAPER_STRING, lcd_buffer_address_start_line_1
+		rcall LCDWrite
+		rjmp player_choice_state_await_timer_expire
+	player_choice_state_display_remote_scissors:
+		const_copy_prog_to_data_16 16, SCISSORS_STRING, lcd_buffer_address_start_line_1
+		rcall LCDWrite
+		rjmp player_choice_state_await_timer_expire
+
+	player_choice_state_await_timer_expire:
+		; <<< DELETE ME ONCE TIMER IMPLEMENTED
+		sbic button_pinx, button_test1_bit
+		; <<< DELETE ME ONCE TIMER IMPLEMENTED
+		rjmp player_choice_state_await_timer_expire
+
 	ret
 
 ;----------------------------------------------------------------
@@ -281,22 +332,22 @@ wait:
     push wait_count_r
 	push wait_inner_loop_r
 	push wait_outter_loop_r
-loop:  
-    ldi wait_outter_loop_r, 224		; load outter loop regisster
-outter_loop:  
-    ldi wait_inner_loop_r, 237		; load inner loop register
-inner_loop:  
-    dec    wait_inner_loop_r
-    brne   inner_loop				; Continue inner loop
-    dec    wait_outter_loop_r
-    brne   outter_loop				; Continue outer loop
-    dec    wait_count_r
-    brne   loop						; Continue wait loop
+	loop:  
+		ldi wait_outter_loop_r, 224				; load outter loop regisster
+		outter_loop:  
+			ldi wait_inner_loop_r, 237			; load inner loop register
+			inner_loop:  
+				dec    wait_inner_loop_r
+				brne   inner_loop				; Continue inner loop
+				dec    wait_outter_loop_r
+				brne   outter_loop				; Continue outer loop
+				dec    wait_count_r
+				brne   loop						; Continue wait loop
 
-    pop wait_outter_loop_r
-    pop wait_inner_loop_r
-    pop wait_count_r
-    ret
+				pop wait_outter_loop_r
+				pop wait_inner_loop_r
+				pop wait_count_r
+				ret
 
 
 ;***********************************************************
@@ -323,6 +374,8 @@ WIN_STRING:
 .DB "You won!        "
 LOOSE_STRING:
 .DB "You lost!       "
+ERROR_NO_MOVE_STRING:
+.DB "ERROR NO MOVE   "
 
 ;***********************************************************
 ;*	Additional Program Includes

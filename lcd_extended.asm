@@ -15,6 +15,7 @@
 ; Desc:		Copies an array of n-bytes specified by param #1
 ;			from program memory specified by param #2 & #3 to
 ;			data memory specified by param #4 & #5.
+; NOTE:     Destroys contents of registers X, Y, and Z
 ;-----------------------------------------------------------
 copy_prog_to_data_16:
 	; pop return address off stack temporarily to access
