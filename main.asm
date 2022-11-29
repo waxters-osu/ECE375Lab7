@@ -20,7 +20,10 @@
 ;*  Internal Register Definitions and Constants
 ;***********************************************************
 .def    mpr = r16               ; Multi-Purpose Register
-
+.def	sent = r17				; Signal sent
+.def	recieved = r18			; Signal Recieved
+.def	TEMP = r19				; Multi-Purpose Register 2
+.def    flag = r24
 ; Use this signal code between two boards for their game ready
 .equ    SendReady = 0b11111111
 
@@ -35,6 +38,13 @@
 .org    $0000                   ; Beginning of IVs
 	    rjmp    INIT            	; Reset interrupt
 
+.org	$0002
+		rjmp	
+.org	$003C
+		rjmp	RECEIVE			; USART recieve routine
+		reti
+
+.org	
 
 .org    $0056                   ; End of Interrupt Vectors
 
@@ -67,11 +77,38 @@ INIT:
 	sts		UCSR1C, mpr
 	;TIMER/COUNTER1
 		;Set Normal mode
+		ldi mpr, 0b00000000
+		sts	TCCR1A, mpr
 
+		ldi mpr, 0b00000100
+		sts TCCR1A, mpr
+
+		ldi mpr, high(0xFFFF)
+		sts	OCR1AH, mpr
+
+		ldi	mpr, low(0xFFFF)
+		sts OCR1AL, mpr
 
 	;Other
+	sei
 
+	;LCD Initialization
+	rcall LCDInit
+	rcall LCDClr
+	ldi		TEMP, 16
+	ldi		ZL, LOW(STRING_START << 1)
+	ldi		ZH, HIGH(STRING_START << 1)
 
+	ldi		YL, $00
+	ldi		YH, $01
+
+loop1: 
+	lpm		mpr, Z+
+	st		Y+, mpr
+	dec		TEMP
+	brne	loop1
+	rcall	LCDBacklightOn
+	rcall	LCDWrLn1
 ;***********************************************************
 ;*  Main Program
 ;***********************************************************
@@ -84,6 +121,45 @@ MAIN:
 ;***********************************************************
 ;*	Functions and Subroutines
 ;***********************************************************
+;***********************************************************
+;* SubRoutine: ReadySig
+;* Description: This routine transmits the ready signal 
+;*				
+;***********************************************************
+;***********************************************************
+;* SubRoutine: Recieve
+;* Description: This routine recieves and decodes what the 
+;*				other board choose for R,P,S
+;***********************************************************
+RECEIVE:
+		push	mpr ; Save states
+
+		lds		recieved, UDR1	;Load in message from other board (ready, Input, etc.)
+
+		;Check to see if other board is ready
+		ldi		mpr, 0b11111111
+		and		mpr, recieved
+		breq	readyCheck		; If mpr is equal to recieved then it is sent to the readyCheck
+		rjmp	CheckInput		; Jump to decode the command
+
+readyCheck:
+		cpi		recieved, SendReady 
+		breq	setReadyFlag		; If ID matches then set flag to true
+		clr		flag				; clear existing flag if incoming ready is not true
+		rjmp	RecieveEND
+		;Set Flag to true if ready signal is sent
+setReadyFlag:
+		ldi		flag, 0x01			; Load flag with true
+		rjmp	CheckInput			; jump to input decoder
+
+		;Decode inputs
+CheckInput:
+		cpi		flag, 0x01			; Check if ready flag is true
+		brne	RecieveEND			; Branch to end of recieve routine
+	
+RecieveEND:
+			pop		mpr				; restore states
+			ret
 
 ;***********************************************************
 ;*	Stored Program Data
@@ -94,7 +170,7 @@ MAIN:
 ; after the .DB directive; these can help to access the data
 ;-----------------------------------------------------------
 STRING_START:
-    .DB		"Welcome!"		; Declaring data in ProgMem
+    .DB		"Pick option     "		; Declaring data in ProgMem
 STRING_END:
 
 ;***********************************************************
