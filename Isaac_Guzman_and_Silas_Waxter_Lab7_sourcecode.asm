@@ -18,6 +18,15 @@
 ; approximately 1.5*countdown_indicator_r seconds.
 .def countdown_indicator_r = r24
 
+; Holds the game state of the opponent. When a message is received, 
+; decode the state and update this register.
+.def opponent_state_r = r25
+.equ opponent_state_ready = 1
+.equ opponent_state_rock = 2
+.equ opponent_state_paper = 3
+.equ opponent_state_scissors = 4
+
+
 ; Describe the LEDs used for the countdown indicator. 
 .equ countdown_indicator_ddrx = DDRB
 .equ countdown_indicator_portx = PORTB
@@ -32,6 +41,11 @@
 .equ button_pinx = PIND
 .equ button_ready_bit = 4
 .equ button_move_bit = 7
+
+; <<< DELETE ME ONCE UART IS READY
+.equ button_test1_bit = 5
+.equ button_test2_bit = 6
+; <<< DELETE ME ONCE UART IS READY
 
 ; used to add some latency to debounce buttons
 .macro debounce_button
@@ -73,6 +87,16 @@ init:
 	sbr mpr, ((1<<button_ready_bit) | (1<<button_move_bit))
 	out button_portx, mpr
 
+	; <<< DELETE ME ONCE TESTING IS COMPLETE
+	; set buttons as inputs with pull-up enabled
+	in mpr, button_ddrx
+	cbr mpr, ((1<<button_test1_bit) | (1<<button_test2_bit))
+	out button_ddrx, mpr
+	in mpr, button_portx
+	sbr mpr, ((1<<button_test1_bit) | (1<<button_test2_bit))
+	out button_portx, mpr
+	; <<< DELETE ME ONCE TESTING IS COMPLETE
+
 
 	; Initialize USART1
 	;-----
@@ -87,6 +111,8 @@ main:
 	out countdown_indicator_portx, mpr
 
 	rcall welcome_state
+
+	rcall wait_state
 
 	rcall LCDClr
 	temp:
@@ -119,6 +145,38 @@ welcome_state:
 	pop mpr
 	ret
 
+wait_state:
+	push mpr
+
+	; copy wait message to lcd buffer
+	ldi mpr, 32
+	push mpr
+	ldi mpr, low(WAIT_STRING)
+	push mpr
+	ldi mpr, high(WAIT_STRING)
+	push mpr
+	ldi mpr, low(lcd_buffer_address_start_line_1)
+	push mpr
+	ldi mpr, high(lcd_buffer_address_start_line_1)
+	push mpr
+	rcall copy_prog_to_data_16
+
+	; synchronize LCD with its buffer
+	rcall LCDWrite
+
+	; TODO: UART communication replace button behavior
+	; block until receive opponenet ready message
+	ldi mpr, opponent_state_ready
+	wait_state_await_opponent_ready:
+		cp opponent_state_r, mpr
+		; <<< DELETE ME ONCE UART ISR IMPLEMENTED
+		sbic button_pinx, button_test1_bit
+		; <<< DELETE ME ONCE UART ISR IMPLEMENTED
+		brne wait_state_await_opponent_ready
+	
+	pop mpr
+	ret
+
 ;***********************************************************
 ;*	Stored Program Data
 ;***********************************************************
@@ -127,7 +185,7 @@ welcome_state:
 WELCOME_STRING:
 .DB "Welcome!        " \
     "Please press PD7"
-WAITING_STRING:
+WAIT_STRING:
 .DB "Ready. Waiting  " \
     "for the opponent"
 START_STRING:
