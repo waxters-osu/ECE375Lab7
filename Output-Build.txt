@@ -1,0 +1,33 @@
+﻿------ Build started: Project: Lab7, Configuration: Debug AVR ------
+Build started.
+Project "Lab7.asmproj" (default targets):
+Target "PreBuildEvent" skipped, due to false condition; ('$(PreBuildEvent)'!='') was evaluated as (''!='').
+Target "CoreBuild" in file "D:\ECE375\Class Software\Atmel\Studio\7.0\Vs\Assembler.targets" from project "D:\ECE375\Code\Lab7\Lab7\Lab7\Lab7.asmproj" (target "Build" depends on it):
+	Task "RunAssemblerTask"
+		D:\ECE375\Class Software\Atmel\Studio\7.0\toolchain\avr8\avrassembler\avrasm2.exe -fI -o "Lab7.hex"  -m "Lab7.map"  -l "Lab7.lss"  -S "Lab7.tmp"  -W+ie -I"D:/ECE375\Class Software\Atmel\Studio\7.0\Packs\atmel\ATmega_DFP\1.7.374\avrasm\inc"  -im32U4def.inc -d "D:\ECE375\Code\Lab7\Lab7\Lab7\Debug\Lab7.obj"  "D:\ECE375\Code\Lab7\Lab7\Lab7\main.asm"  -I "D:\ECE375\Class Software\Atmel\Studio\7.0\toolchain\avr8\avrassembler\Include" 
+		AVRASM: AVR macro assembler 2.2.8 (build 80 Jan 14 2020 18:27:50)
+		Copyright (C) 1995-2020 ATMEL Corporation
+		[builtin](2): Including file 'D:/ECE375\Class Software\Atmel\Studio\7.0\Packs\atmel\ATmega_DFP\1.7.374\avrasm\inc\m32U4def.inc'
+		D:\ECE375\Code\Lab7\Lab7\Lab7\main.asm(17): Including file 'D:/ECE375\Class Software\Atmel\Studio\7.0\Packs\atmel\ATmega_DFP\1.7.374\avrasm\inc\m32U4def.inc'
+		D:\ECE375\Code\Lab7\Lab7\Lab7\main.asm(114): Including file 'D:\ECE375\Code\Lab7\Lab7\Lab7\LCDDriver.asm'
+		D:\ECE375\Code\Lab7\Lab7\Lab7\LCDDriver.asm(31): Including file 'D:/ECE375\Class Software\Atmel\Studio\7.0\Packs\atmel\ATmega_DFP\1.7.374\avrasm\inc\m32U4def.inc'
+		[builtin](2): Including file 'D:/ECE375\Class Software\Atmel\Studio\7.0\Packs\atmel\ATmega_DFP\1.7.374\avrasm\inc\m32U4def.inc'
+		D:\ECE375\Code\Lab7\Lab7\Lab7\main.asm(17): Including file 'D:/ECE375\Class Software\Atmel\Studio\7.0\Packs\atmel\ATmega_DFP\1.7.374\avrasm\inc\m32U4def.inc'
+		D:\ECE375\Code\Lab7\Lab7\Lab7\main.asm(114): Including file 'D:\ECE375\Code\Lab7\Lab7\Lab7\LCDDriver.asm'
+		D:\ECE375\Code\Lab7\Lab7\Lab7\LCDDriver.asm(31): Including file 'D:/ECE375\Class Software\Atmel\Studio\7.0\Packs\atmel\ATmega_DFP\1.7.374\avrasm\inc\m32U4def.inc'
+		"ATmega32U4" memory use summary [bytes]:
+		Segment   Begin    End      Code   Data   Used    Size   Use%
+		---------------------------------------------------------------
+		[.cseg] 0x000000 0x00132c    634   4104   4738   32768  14.5%
+		[.dseg] 0x000100 0x000100      0      0      0    2560   0.0%
+		[.eseg] 0x000000 0x000000      0      0      0    1024   0.0%
+		Assembly complete, 0 errors. 0 warnings
+	Done executing task "RunAssemblerTask".
+Done building target "CoreBuild" in project "Lab7.asmproj".
+Target "PostBuildEvent" skipped, due to false condition; ('$(PostBuildEvent)' != '') was evaluated as ('' != '').
+Target "Build" in file "D:\ECE375\Class Software\Atmel\Studio\7.0\Vs\Avr.common.targets" from project "D:\ECE375\Code\Lab7\Lab7\Lab7\Lab7.asmproj" (entry point):
+Done building target "Build" in project "Lab7.asmproj".
+Done building project "Lab7.asmproj".
+
+Build succeeded.
+========== Build: 1 succeeded or up-to-date, 0 failed, 0 skipped ==========
