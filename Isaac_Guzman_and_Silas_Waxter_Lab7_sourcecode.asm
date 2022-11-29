@@ -22,6 +22,7 @@
 .def remote_game_state_r = r23
 .def local_game_state_r = r24
 .equ game_state_ready_bit = 4
+; NOTE: outcome of game is based on this specific bit order of moves
 .equ game_state_rock_bit = 1
 .equ game_state_paper_bit = 2
 .equ game_state_scissors_bit = 3
@@ -177,7 +178,7 @@ main:
 
 	rcall player_choice_state
 
-	;rcall outcome_state
+	rcall outcome_state
 
 	rcall LCDClr
 	rjmp main
@@ -318,6 +319,63 @@ player_choice_state:
 
 	ret
 
+outcome_state:
+	push r16
+	push r17
+
+	; Copy the game state to working registers
+	mov r16, local_game_state_r
+	mov r17, remote_game_state_r
+
+	; Mask out all state except move choices
+	andi r16, (1<<game_state_rock_bit | 1<<game_state_paper_bit | 1<<game_state_scissors_bit)
+	andi r17, (1<<game_state_rock_bit | 1<<game_state_paper_bit | 1<<game_state_scissors_bit)
+
+	; Check for tie
+	cp r16, r17
+	breq outcome_state_tie
+
+	; Check for win/loose
+	; This implementation is dependent on the specific bit pattern
+	; defined: Local won if the right shifted bits (with LSB within mask
+	; to MSB within mask) of local game state bits is equal to remote.
+	ror r16							; since this is a copy of the actual game state, it doesn't
+									; matter if the carry bit gets propogated to register's MSB
+	brcc outcome_state_tie_clear_msb_mask
+	outcome_state_tie_set_msb_mask:
+		sbr r16, game_state_scissors_bit
+		rjmp outcome_state_win_or_loose
+	outcome_state_tie_clear_msb_mask:
+		cbr r16, game_state_scissors_bit
+		rjmp outcome_state_win_or_loose
+	outcome_state_win_or_loose:
+		cp r16, r17
+		breq outcome_state_win
+		brne outcome_state_loose
+
+	outcome_state_tie:
+		const_copy_prog_to_data_16 16, TIE_STRING, lcd_buffer_address_start_line_1
+		rcall LCDWrite
+		rjmp outcome_state_await_timer_expire
+	outcome_state_win:
+		const_copy_prog_to_data_16 16, WIN_STRING, lcd_buffer_address_start_line_1
+		rcall LCDWrite
+		rjmp outcome_state_await_timer_expire
+	outcome_state_loose:
+		const_copy_prog_to_data_16 16, LOOSE_STRING, lcd_buffer_address_start_line_1
+		rcall LCDWrite
+		rjmp outcome_state_await_timer_expire
+	
+	outcome_state_await_timer_expire:
+		; <<< DELETE ME ONCE TIMER IMPLEMENTED
+		sbic button_pinx, button_test2_bit
+		; <<< DELETE ME ONCE TIMER IMPLEMENTED
+		rjmp outcome_state_await_timer_expire
+
+pop r17
+pop r16
+ret
+
 ;----------------------------------------------------------------
 ; Func:		Wait
 ; Desc:		A wait loop that does nothing for approximately 
@@ -370,6 +428,8 @@ PAPER_STRING:
 .DB "Paper           "
 SCISSORS_STRING:
 .DB "Scissors        "
+TIE_STRING:
+.DB "You tied.       "
 WIN_STRING:
 .DB "You won!        "
 LOOSE_STRING:
