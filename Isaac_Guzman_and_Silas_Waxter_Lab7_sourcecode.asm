@@ -86,6 +86,17 @@ main:
 	ori mpr, countdown_indicator_equal_4
 	out countdown_indicator_portx, mpr
 
+	rcall welcome_state
+
+	rcall LCDClr
+	temp:
+	rjmp temp
+
+; displays welcome message and blocks until button is pressed
+welcome_state:
+	push mpr
+
+	; copy welcome message to lcd buffer
 	ldi mpr, 32
 	push mpr
 	ldi mpr, low(WELCOME_STRING)
@@ -98,9 +109,15 @@ main:
 	push mpr
 	rcall copy_prog_to_data_16
 
+	; synchronize LCD with its buffer
 	rcall LCDWrite
 
-	rjmp main
+	welcome_state_await_button_press:
+		sbic button_pinx, button_move_bit
+		rjmp welcome_state_await_button_press
+	
+	pop mpr
+	ret
 
 ;***********************************************************
 ;*	Stored Program Data
