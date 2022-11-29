@@ -16,7 +16,7 @@
 ; Holds the current countdown indicator. After changing this 
 ; value, the time remaining in the countdown is equal to 
 ; approximately 1.5*countdown_indicator_r seconds.
-.def countdown_indicator_r = r20
+.def countdown_indicator_r = r24
 
 ; Describe the LEDs used for the countdown indicator. 
 .equ countdown_indicator_ddrx = DDRB
@@ -53,6 +53,10 @@ init:
 	;       initialization to not matter and decouples the
 	;       code. It may ease debugging.
 	;--------------------------------------------------------
+	; Initialize LCD Display
+	rcall LCDInit
+	rcall LCDBacklightOn
+	rcall LCDClr
 
 	; Initialize I/0 Pins
 	;-----
@@ -82,7 +86,49 @@ main:
 	ori mpr, countdown_indicator_equal_4
 	out countdown_indicator_portx, mpr
 
+	ldi mpr, 32
+	push mpr
+	ldi mpr, low(WELCOME_STRING)
+	push mpr
+	ldi mpr, high(WELCOME_STRING)
+	push mpr
+	ldi mpr, low(lcd_buffer_address_start_line_1)
+	push mpr
+	ldi mpr, high(lcd_buffer_address_start_line_1)
+	push mpr
+	rcall copy_prog_to_data_16
 
-	
+	rcall LCDWrite
 
 	rjmp main
+
+;***********************************************************
+;*	Stored Program Data
+;***********************************************************
+; LCD buffer size is 15 characters. Ensure strings are the 
+; same size to avoid writing garbage characters.
+WELCOME_STRING:
+.DB "Welcome!        " \
+    "Please press PD7"
+WAITING_STRING:
+.DB "Ready. Waiting  " \
+    "for the opponent"
+START_STRING:
+.DB "Game start      " \
+    "                "
+ROCK_STRING:
+.DB "Rock            "
+PAPER_STRING:
+.DB "Paper           "
+SCISSORS_STRING:
+.DB "Scissors        "
+WIN_STRING:
+.DB "You won!        "
+LOOSE_STRING:
+.DB "You lost!       "
+
+;***********************************************************
+;*	Additional Program Includes
+;***********************************************************
+.include "lcd_extended.asm"
+.include "LCDDriver.asm"
