@@ -24,16 +24,40 @@
 .def wait_inner_loop_r = r18
 .def wait_outter_loop_r = r19
 
-.def	send = r17					; Signal sent
-.def	recieved = r18				; Signal Recieved
-.def	TEMP = r19					; Multi-Purpose Register 2
-.def    flag = r24
+.def flag_r = r24
+
+; Describe the LEDs used for the countdown indicator. 
+.equ countdown_indicator_ddrx = DDRB
+.equ countdown_indicator_portx = PORTB
+.equ countdown_indicator_lowest_bit = 4
+.equ countdown_indicator_mask = 0xF0
+.equ countdown_indicator_equal_1 = 0b0001
+.equ countdown_indicator_equal_2 = 0b0011
+.equ countdown_indicator_equal_3 = 0b0111
+.equ countdown_indicator_equal_4 = 0b1111
+
 
 ; Use this signal code between two boards for their game ready
-.equ    SendReady = 0b11111111
+.equ    ready_signal = 0xFF
 .equ	maxCharacter = 16
 .equ	readyButton = 7
 .equ	gestureButton = 4
+
+;----------------------------------------------------------------
+; Desc: set the countdown indicator LEDs to the passed setting.
+; Ex:	`set_countdown_indicator countdown_indicator_equal_3`
+; Param:
+;		@0 = const. countdown indicator bits (non-shifted)
+;----------------------------------------------------------------
+.macro set_countdown_indicator
+	push mpr
+	in mpr, countdown_indicator_portx
+	andi mpr, ~(countdown_indicator_mask)	; select only-masked bits
+	ori mpr, (@0<<countdown_indicator_lowest_bit)
+	out countdown_indicator_portx, mpr
+	pop mpr
+.endmacro
+
 ;***********************************************************
 ;*  Start of Code Segment
 ;***********************************************************
@@ -46,7 +70,7 @@
 	    rjmp    INIT            	; Reset interrupt
 
 .org	$003C
-		rjmp	RECEIVE				; USART recieve routine
+		rjmp	uart1_receive_isr
 		reti
 
 
@@ -65,6 +89,11 @@ INIT:
 	out	SPL, mpr
 
 	;I/O Ports
+	; set countdown indicators as output pins
+	in mpr, countdown_indicator_ddrx
+	sbr mpr, countdown_indicator_mask
+	out countdown_indicator_ddrx, mpr
+
 	
 	;Port D (TX and RX)
 	ldi	mpr, (1<<PD3)
@@ -114,37 +143,26 @@ INIT:
 	ldi	mpr, low(0xFFFF)
 	sts 	OCR1AL, mpr
 
+	set_countdown_indicator countdown_indicator_equal_1
 
 	;Other
 	sei
+
 ;***********************************************************
 ;*  Main Program
 ;***********************************************************
 MAIN:
-	inc mpr
+
+
+	; transmit ready signal when ready button is pressed
+	ldi mpr, 11
+	sbis PIND, readyButton
 	rcall uart1_transmit
 
 	rjmp MAIN
 
 
 
-
-
-
-	;Get Button inputs
-	in	mpr, PIND
-
-	andi	mpr, (1<<readyButton)|(1<<gestureButton)
-	cpi	mpr, (1<<readyButton)
-	brne	Step
-	rcall	ReadySig
-	rjmp	MAIN
-
-Step:
-	cpi	mpr, (1<<gestureButton)
-	brne	MAIN
-	rcall	Gesture
-	rjmp	MAIN
 
 ;***********************************************************
 ;*	Functions and Subroutines
@@ -175,58 +193,29 @@ uart1_transmit:
 	pop r17
 	pop mpr
 	ret
-
-;***********************************************************
-;* SubRoutine: ReadySig
-;* Description: This routine transmits the ready signal to 
-;*				the other board			
-;***********************************************************
-ReadySig:
-
-	ldi	send, SendReady
-	sts	UDR1, send
-		
-	pop	mpr
-	ret 
 		
 ;***********************************************************
-;* SubRoutine: Recieve
-;* Description: This routine recieves and decodes what the 
-;*				other board choose for gesture
+; Desc:  The isr for receive on uart1.
 ;***********************************************************
-RECEIVE:
-	push	mpr ; Save states
+uart1_receive_isr:
+	push mpr
 
-	lds	recieved, UDR1			;Load in message from other board (ready, Input, etc.)
+	lds	mpr, UDR1			;Load in message from other board (ready, Input, etc.)
 
-;Check to see if other board is ready
-	ldi	mpr, 0b11111111
-	and	mpr, recieved
-	breq	readyCheck			; If mpr is equal to recieved then it is sent to the readyCheck
-	rjmp	CheckInput			; Jump to decode the command
+	cpi mpr, ready_signal
+	breq receive_good
 
-readyCheck:
-	cpi	recieved, SendReady 
-	breq	setReadyFlag			; If ID matches then set flag to true
-	clr	flag				; clear existing flag if incoming ready is not true
-	rjmp	RecieveEND
+	receive_bad:
+		set_countdown_indicator countdown_indicator_equal_2
+		rjmp recieve_return
 
-;Set Flag to true if ready signal is sent
-setReadyFlag:
-	ldi	flag, 0x01			; Load flag with true
-	rjmp	CheckInput			; jump to input decoder
-
-
-;Decode inputs
-CheckInput:
-	cpi	flag, 0x01			; Check if ready flag is true
-	brne	RecieveEND			; Branch to end of recieve routine if flag is not set
-
-
+	receive_good:
+		set_countdown_indicator countdown_indicator_equal_3
+		rjmp recieve_return
 	
-RecieveEND:
-	pop	mpr				; restore states
-	ret
+	recieve_return:
+		pop	mpr				; restore states
+		ret
 
 ;----------------------------------------------------------------
 ; Func:		Wait
