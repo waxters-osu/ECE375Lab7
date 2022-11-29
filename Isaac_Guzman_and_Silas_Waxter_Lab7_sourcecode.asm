@@ -197,7 +197,7 @@ welcome_state:
 		sbic button_pinx, button_ready_bit
 		rjmp welcome_state_await_button_press
 	
-	ldi local_game_state_r, (1<<game_state_ready_bit)
+	;ldi local_game_state_r, (1<<game_state_ready_bit)
 	pop mpr
 	ret
 
@@ -217,7 +217,7 @@ wait_state:
 		; <<< DELETE ME ONCE UART ISR IMPLEMENTED
 		sbic button_pinx, button_test1_bit
 		; <<< DELETE ME ONCE UART ISR IMPLEMENTED
-		brne wait_state_await_remote_ready
+		rjmp wait_state_await_remote_ready
 	
 	pop mpr
 	ret
