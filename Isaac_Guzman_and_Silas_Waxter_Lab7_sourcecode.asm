@@ -121,6 +121,7 @@ INIT:
 ;*  Main Program
 ;***********************************************************
 MAIN:
+	inc mpr
 	rcall uart1_transmit
 
 	rjmp MAIN
@@ -149,11 +150,17 @@ Step:
 ;*	Functions and Subroutines
 ;***********************************************************
 ;***********************************************************
-; Func: usart1_transmit
-; 
+; Desc:  Transmits the data stored in mpr over uart1. Blocks
+;		 until prior transmit is completed and transmit
+;        buffer is empty.
+; Param: mpr = data to transmit
 ;***********************************************************
 uart1_transmit:
 	push mpr
+	push r17
+
+	; copy the data to transmit
+	mov r17, mpr
 		
 	uart1_transmit_await_empty_transmit_buffer:
 		; Wait for empty transmit buffer
@@ -163,9 +170,9 @@ uart1_transmit:
 		brne uart1_transmit_await_empty_transmit_buffer
 	
 	; transmit data
-	ldi	mpr, 0x44
-	sts	UDR1, mpr
+	sts	UDR1, r17
 
+	pop r17
 	pop mpr
 	ret
 
