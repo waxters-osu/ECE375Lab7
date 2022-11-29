@@ -29,7 +29,8 @@
 ; Describe the LEDs used for the countdown indicator. 
 .equ countdown_indicator_ddrx = DDRB
 .equ countdown_indicator_portx = PORTB
-.equ countdown_indicator_mask = 0b1111
+.equ countdown_indicator_lowest_bit = 4
+.equ countdown_indicator_mask = 0xF0
 .equ countdown_indicator_equal_1 = 0b0001
 .equ countdown_indicator_equal_2 = 0b0011
 .equ countdown_indicator_equal_3 = 0b0111
@@ -46,11 +47,56 @@
 .equ button_test2_bit = 6
 ; <<< DELETE ME ONCE UART IS READY
 
-; used to add some latency to debounce buttons
+;----------------------------------------------------------------
+; Desc: debounce button wait method
+;----------------------------------------------------------------
 .macro debounce_button
 	ldi wait_count_r, 15	;150ms delay
 	rcall wait
 .endmacro
+
+;----------------------------------------------------------------
+; Desc: set the countdown indicator LEDs to the passed setting.
+; Ex:	`set_countdown_indicator countdown_indicator_equal_3`
+; Param:
+;		@0 = const. countdown indicator bits (non-shifted)
+;----------------------------------------------------------------
+.macro set_countdown_indicator
+	push mpr
+	in mpr, countdown_indicator_portx
+	andi mpr, ~(countdown_indicator_mask)	; select only-masked bits
+	ori mpr, (@0<<countdown_indicator_lowest_bit)
+	out countdown_indicator_portx, mpr
+	pop mpr
+.endmacro
+
+;----------------------------------------------------------------
+; Desc: call copy_prog_to_data_16 with the const parameters. Makes
+;		subroutine call denser and easier to read.
+; Ex:	`const_copy_prog_to_data_16 32 ROCK_STRING lcd_buffer_address_start_line_1`
+; Param:
+;		@0 = const. number of bits to copy (corresponds to param #1)
+;		@1 = const. first data memory address (corresponds to params #2 & #3)
+;		@2 = const. first prog memory address (corresponds to params #4 & #5)
+;----------------------------------------------------------------
+.macro const_copy_prog_to_data_16
+	push mpr
+
+	ldi mpr, @0
+	push mpr
+	ldi mpr, low(@1)
+	push mpr
+	ldi mpr, high(@1)
+	push mpr
+	ldi mpr, low(@2)
+	push mpr
+	ldi mpr, high(@2)
+	push mpr
+	rcall copy_prog_to_data_16
+
+	pop mpr
+.endmacro
+
 
 init:
 	; Initialize the stack pointer.
@@ -106,10 +152,7 @@ init:
 	;-----
 
 main:
-	in mpr, countdown_indicator_portx
-	andi mpr, ~(countdown_indicator_mask)	; clear masked bits
-	ori mpr, countdown_indicator_equal_4
-	out countdown_indicator_portx, mpr
+	set_countdown_indicator countdown_indicator_equal_4
 
 	rcall welcome_state
 
@@ -130,17 +173,7 @@ welcome_state:
 	push mpr
 
 	; copy welcome message to lcd buffer
-	ldi mpr, 32
-	push mpr
-	ldi mpr, low(WELCOME_STRING)
-	push mpr
-	ldi mpr, high(WELCOME_STRING)
-	push mpr
-	ldi mpr, low(lcd_buffer_address_start_line_1)
-	push mpr
-	ldi mpr, high(lcd_buffer_address_start_line_1)
-	push mpr
-	rcall copy_prog_to_data_16
+	const_copy_prog_to_data_16 32, WELCOME_STRING, lcd_buffer_address_start_line_1
 
 	; synchronize LCD with its buffer
 	rcall LCDWrite
@@ -156,17 +189,7 @@ wait_state:
 	push mpr
 
 	; copy wait message to lcd buffer
-	ldi mpr, 32
-	push mpr
-	ldi mpr, low(WAIT_STRING)
-	push mpr
-	ldi mpr, high(WAIT_STRING)
-	push mpr
-	ldi mpr, low(lcd_buffer_address_start_line_1)
-	push mpr
-	ldi mpr, high(lcd_buffer_address_start_line_1)
-	push mpr
-	rcall copy_prog_to_data_16
+	const_copy_prog_to_data_16 32, WAIT_STRING, lcd_buffer_address_start_line_1
 
 	; synchronize LCD with its buffer
 	rcall LCDWrite
@@ -186,19 +209,11 @@ wait_state:
 
 start_state:
 	push mpr
+	push XL
+	push XH
 
 	; copy wait message to lcd buffer
-	ldi mpr, 32
-	push mpr
-	ldi mpr, low(START_STRING)
-	push mpr
-	ldi mpr, high(START_STRING)
-	push mpr
-	ldi mpr, low(lcd_buffer_address_start_line_1)
-	push mpr
-	ldi mpr, high(lcd_buffer_address_start_line_1)
-	push mpr
-	rcall copy_prog_to_data_16
+	const_copy_prog_to_data_16 32, START_STRING, lcd_buffer_address_start_line_1
 
 	; synchronize LCD with its buffer
 	rcall LCDWrite
@@ -206,79 +221,47 @@ start_state:
 	; block until timer expires
 	start_state_await_timer_expire:
 		; continously poll button. once pressed change move state to next
+		in mpr, button_pinx
 		sbic button_pinx, button_move_bit
 		rjmp start_state_finished_move_change
 
 		debounce_button
 
 		; if game state doesn't have a move set, set it to rock
-		andi local_game_state_r, (1<<game_state_rock_bit | 1<<game_state_paper_bit | 1<<game_state_scissors_bit)
-		brne start_state_next_move
-		ldi local_game_state_r, (1<<game_state_rock_bit)
-		rjmp start_state_finished_move_change
-
-		start_state_next_move:
-			sbrc local_game_state_r, game_state_rock_bit
-			ldi local_game_state_r, 1<<game_state_paper_bit
-			sbrc local_game_state_r, game_state_paper_bit
-			ldi local_game_state_r, 1<<game_state_scissors_bit
-			sbrc local_game_state_r, game_state_scissors_bit
-			ldi local_game_state_r, 1<<game_state_rock_bit
+		mov mpr, local_game_state_r
+		andi mpr, (1<<game_state_rock_bit | 1<<game_state_paper_bit | 1<<game_state_scissors_bit)
+		breq start_state_set_rock
+		; branch to set next move based on currently set move
+		cpi local_game_state_r, 1<<game_state_rock_bit
+		breq start_state_set_paper
+		cpi local_game_state_r, 1<<game_state_paper_bit
+		breq start_state_set_scissors
+		cpi local_game_state_r, 1<<game_state_scissors_bit
+		breq start_state_set_rock  
 			
+		start_state_set_rock:
+			ldi local_game_state_r, 1<<game_state_rock_bit
+			const_copy_prog_to_data_16 16, ROCK_STRING, lcd_buffer_address_start_line_2
+			rcall LCDWrite
+			rjmp start_state_finished_move_change
+
+		start_state_set_paper:
+			ldi local_game_state_r, 1<<game_state_paper_bit
+			const_copy_prog_to_data_16 16, PAPER_STRING, lcd_buffer_address_start_line_2
+			rcall LCDWrite
+			rjmp start_state_finished_move_change
+
+		start_state_set_scissors:
+			ldi local_game_state_r, 1<<game_state_scissors_bit
+			const_copy_prog_to_data_16 16, SCISSORS_STRING, lcd_buffer_address_start_line_2
+			rcall LCDWrite
+			rjmp start_state_finished_move_change
+
 		start_state_finished_move_change:
-			rcall display_local_move
 			; <<< DELETE ME ONCE UART ISR IMPLEMENTED
 			sbic button_pinx, button_test2_bit
 			; <<< DELETE ME ONCE UART ISR IMPLEMENTED
 			rjmp start_state_await_timer_expire
-	
-	pop mpr
-	ret
-
-display_local_move:
-	push mpr
-	push XL
-	push XH
-
-	sbrs local_game_state_r, game_state_rock_bit
-	rjmp display_local_move_rock
-
-	sbrs local_game_state_r, game_state_paper_bit
-	rjmp display_local_move_paper
-
-	sbrs local_game_state_r, game_state_scissors_bit
-	rjmp display_local_move_scissors
-
-	display_local_move_rock:
-		ldi XL, low(ROCK_STRING)
-		ldi XH, high(ROCK_STRING)
-		rjmp display_local_move_display
-
-	display_local_move_paper:
-		ldi XL, low(PAPER_STRING)
-		ldi XH, high(PAPER_STRING)
-		rjmp display_local_move_display
-
-	display_local_move_scissors:
-		ldi XL, low(SCISSORS_STRING)
-		ldi XH, high(SCISSORS_STRING)
-		rjmp display_local_move_display
-
-	display_local_move_display:
-		ldi mpr, 16
-		push mpr
-		mov mpr, XL
-		push mpr
-		mov mpr, XH
-		push mpr
-		ldi mpr, low(lcd_buffer_address_start_line_2)
-		push mpr
-		ldi mpr, high(lcd_buffer_address_start_line_2)
-		push mpr
-		rcall copy_prog_to_data_16
-
-	rcall LCDWrite
-
 	pop XH
 	pop XL
 	pop mpr
