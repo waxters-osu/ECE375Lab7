@@ -61,10 +61,16 @@ INIT:
 	out		SPL, mpr
 
 	;I/O Ports
+	
+	;Port D (TX and RX)
+	ldi		mpr, (1<<PD3)
+	out		DDRD, mpr
+	ldi		mpr, (0<<PD2)
+	out		DDRD, mpr
 	;Port B (LEDS)
 	ldi		mpr, 0xFF
 	out		DDRB, mpr
-	;PORT D (Buttons
+	;PORT D (Buttons)
 	ldi		mpr, (0<<readyButton)|(0<<gestureButton)
 	out		DDRD,mpr
 
