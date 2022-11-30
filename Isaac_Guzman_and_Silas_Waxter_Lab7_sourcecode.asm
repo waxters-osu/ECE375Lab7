@@ -465,25 +465,6 @@ uart1_receive_isr:
 			
 	lds	remote_game_state_r, UDR1
 
-	/*uart1_receive_isr_read_buffer:
-		lds	remote_game_state_r, UDR1
-		lds mpr, UCSR1A
-		sbrc mpr, 7
-		rjmp uart1_receive_isr_read_buffer
-	
-	mov r17, remote_game_state_r
-	clc
-	rol r17
-	rol r17
-	rol r17
-	rol r17
-
-	in mpr, countdown_indicator_portx
-	andi mpr, ~(countdown_indicator_mask)	; clear countdown indicator
-	or mpr, r17
-	sbr mpr, 1<<4
-	out countdown_indicator_portx, mpr*/
-
 	pop r17
 	pop mpr
 	ret
