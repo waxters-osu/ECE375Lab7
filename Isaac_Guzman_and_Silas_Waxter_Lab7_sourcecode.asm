@@ -38,6 +38,7 @@
 .equ countdown_indicator_portx = PORTB
 .equ countdown_indicator_lowest_bit = 4
 .equ countdown_indicator_mask = 0xF0
+.equ countdown_indicator_equal_0 = 0b0000
 .equ countdown_indicator_equal_1 = 0b0001
 .equ countdown_indicator_equal_2 = 0b0011
 .equ countdown_indicator_equal_3 = 0b0111
@@ -75,6 +76,42 @@
 	ori mpr, (@0<<countdown_indicator_lowest_bit)
 	out countdown_indicator_portx, mpr
 	pop mpr
+.endmacro
+
+;----------------------------------------------------------------
+; Desc: updates the countdown indicator LEDs to match the 
+;		countdown indicator register.
+;----------------------------------------------------------------
+.macro update_countdown_indicator
+	cpi countdown_indicator_r, 4
+	breq update_countdown_indicator_4
+	cpi countdown_indicator_r, 3
+	breq update_countdown_indicator_3
+	cpi countdown_indicator_r, 2
+	breq update_countdown_indicator_2
+	cpi countdown_indicator_r, 1
+	breq update_countdown_indicator_1
+	cpi countdown_indicator_r, 0
+	breq update_countdown_indicator_0
+
+	update_countdown_indicator_4:
+		set_countdown_indicator countdown_indicator_equal_4
+		rjmp update_countdown_indicator_return
+	update_countdown_indicator_3:
+		set_countdown_indicator countdown_indicator_equal_3
+		rjmp update_countdown_indicator_return
+	update_countdown_indicator_2:
+		set_countdown_indicator countdown_indicator_equal_2
+		rjmp update_countdown_indicator_return
+	update_countdown_indicator_1:
+		set_countdown_indicator countdown_indicator_equal_1
+		rjmp update_countdown_indicator_return
+	update_countdown_indicator_0:
+		set_countdown_indicator countdown_indicator_equal_0
+		rjmp update_countdown_indicator_return
+
+	update_countdown_indicator_return:
+		nop
 .endmacro
 
 ;----------------------------------------------------------------
@@ -267,6 +304,9 @@ init:
 	sei
 
 main:
+	ldi countdown_indicator_r, 4
+	update_countdown_indicator
+
 	; set default game state for local and remote
 	clr local_game_state_r
 	clr remote_game_state_r
@@ -501,15 +541,20 @@ uart1_receive_isr:
 timer1_compare_match_A_isr:
 	push mpr
 
-	set_countdown_indicator countdown_indicator_equal_4
-	
-	; Zero the counter
-	ldi mpr, 0
-	sts TCNT1H, mpr
-	sts	TCNT1L, mpr
+	cpi countdown_indicator_r, 0
+	breq timer_compare_match_A_isr_return
 
-	pop mpr
-	ret
+	dec countdown_indicator_r
+	update_countdown_indicator
+	
+	timer_compare_match_A_isr_return:
+		; Zero the counter
+		ldi mpr, 0
+		sts TCNT1H, mpr
+		sts	TCNT1L, mpr
+
+		pop mpr
+		ret
 
 ;----------------------------------------------------------------
 ; Func:		Wait
