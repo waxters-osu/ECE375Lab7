@@ -312,12 +312,28 @@ main:
 	; set default game state for local and remote
 	clr local_game_state_r
 	clr remote_game_state_r
+	transmit_local_game_state
 
 	rcall welcome_state
+	transmit_local_game_state
 
 	rcall wait_state
+	transmit_local_game_state
 
 	rcall start_state
+	transmit_local_game_state
+	; BUG-PATCH: This is super gross but transmitting is unreliable. After 
+	; 100 transmitts, there is a high probability that the local game
+	; state is stored correctly on the other device
+	; BETTER SOLUTION: Consider changing the uart transmition/receive to implement
+	; a reliable data transfer. Use error checking and an ACK/NACK scheme. Then 
+	; refactor state transitions to block until remote has confirmed it correctly 
+	; received the transmitted message
+	ldi mpr, 100
+	temp:
+		transmit_local_game_state
+		dec mpr
+		brne temp
 
 	rcall player_choice_state
 
@@ -333,13 +349,14 @@ welcome_state:
 	const_copy_prog_to_data_16 32, WELCOME_STRING, lcd_buffer_address_start_line_1
 	rcall LCDWrite
 
+	; block until button is pressed
 	welcome_state_await_button_press:
-		transmit_local_game_state
 		sbic button_pinx, button_ready_bit
 		rjmp welcome_state_await_button_press
 	
 	; update local game state
 	sbr local_game_state_r, (1<<game_state_ready_bit)
+
 	pop mpr
 	ret
 
@@ -349,7 +366,6 @@ wait_state:
 	rcall LCDWrite
 
 	wait_state_await_remote_ready:
-		transmit_local_game_state
 		sbrs remote_game_state_r, game_state_ready_bit
 		rjmp wait_state_await_remote_ready
 
@@ -404,8 +420,6 @@ start_state:
 			rjmp start_state_finished_move_change
 
 		start_state_finished_move_change:
-			transmit_local_game_state
-
 			display_game_state local_game_state_r, lcd_buffer_address_start_line_2
 
 			cpi countdown_indicator_r, 0
@@ -414,29 +428,28 @@ start_state:
 			rjmp start_state_await_timer_expire
 
 	start_state_return:
-		; transmit move again after its finaly selected
-		transmit_local_game_state
-
 		pop XH
 		pop XL
 		pop mpr
 		ret
 
 player_choice_state:
-	player_choice_state_await_timer_expire:
-		; ensure that remote has correct game state
-		transmit_local_game_state
+	; initialize the 6 second timer
+	ldi countdown_indicator_r, 4		; countdown_indicator_r * 1.5 seconds
+	update_countdown_indicator
 
+	player_choice_state_await_timer_expire:
 		; update display with selected values
 		display_game_state local_game_state_r, lcd_buffer_address_start_line_2
 		display_game_state remote_game_state_r, lcd_buffer_address_start_line_1
 
-		; <<< DELETE ME ONCE TIMER IMPLEMENTED
-		sbic button_pinx, button_test1_bit
-		; <<< DELETE ME ONCE TIMER IMPLEMENTED
+		cpi countdown_indicator_r, 0
+		breq player_choice_state_return
+
 		rjmp player_choice_state_await_timer_expire
 
-	ret
+	player_choice_state_return:
+		ret
 
 outcome_state:
 	push mpr
@@ -481,25 +494,31 @@ outcome_state:
 	outcome_state_tie:
 		const_copy_prog_to_data_16 16, TIE_STRING, lcd_buffer_address_start_line_1
 		rcall LCDWrite
-		rjmp outcome_state_await_timer_expire
+		rjmp outcome_state_timer
 	outcome_state_win:
 		const_copy_prog_to_data_16 16, WIN_STRING, lcd_buffer_address_start_line_1
 		rcall LCDWrite
-		rjmp outcome_state_await_timer_expire
+		rjmp outcome_state_timer
 	outcome_state_loose:
 		const_copy_prog_to_data_16 16, LOOSE_STRING, lcd_buffer_address_start_line_1
 		rcall LCDWrite
-		rjmp outcome_state_await_timer_expire
+		rjmp outcome_state_timer
 	
-	outcome_state_await_timer_expire:
-		; <<< DELETE ME ONCE TIMER IMPLEMENTED
-		sbic button_pinx, button_test2_bit
-		; <<< DELETE ME ONCE TIMER IMPLEMENTED
-		rjmp outcome_state_await_timer_expire
+	outcome_state_timer:
+		; initialize the 6 second timer
+		ldi countdown_indicator_r, 4		; countdown_indicator_r * 1.5 seconds
+		update_countdown_indicator
 
-pop r17
-pop mpr
-ret
+		outcome_state_await_timer_expire:
+			cpi countdown_indicator_r, 0
+			breq outcome_state_return
+
+			rjmp outcome_state_await_timer_expire
+
+	outcome_state_return:
+		pop r17
+		pop mpr
+		ret
 
 ;***********************************************************
 ; Desc:  Transmits the data stored in mpr over uart1. Blocks
