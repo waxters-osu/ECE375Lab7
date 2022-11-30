@@ -22,11 +22,13 @@
 ; Holds the current countdown indicator. After changing this 
 ; value, the time remaining in the countdown is equal to 
 ; approximately 1.5*countdown_indicator_r seconds.
-.def countdown_indicator_r = r25
+; WARNING: THIS REGISTER IS A GLOBAL VARIABLE ACCESSED IN INTERRUPT
+;		   IT CANNOT BE USED IN SUBROUTINES EVEN WITH PUSH/POP
+.def countdown_indicator_r = r23
 
 ; Holds the game state of both players.
-.def remote_game_state_r = r23
-.def local_game_state_r = r24
+.def remote_game_state_r = r24
+.def local_game_state_r = r25
 ; NOTE: outcome of game is based on this specific bit order of moves
 .equ game_state_rock_bit = 0
 .equ game_state_paper_bit = 1
@@ -38,6 +40,7 @@
 .equ countdown_indicator_portx = PORTB
 .equ countdown_indicator_lowest_bit = 4
 .equ countdown_indicator_mask = 0xF0
+.equ countdown_indicator_equal_0 = 0b0000
 .equ countdown_indicator_equal_1 = 0b0001
 .equ countdown_indicator_equal_2 = 0b0011
 .equ countdown_indicator_equal_3 = 0b0111
@@ -75,6 +78,42 @@
 	ori mpr, (@0<<countdown_indicator_lowest_bit)
 	out countdown_indicator_portx, mpr
 	pop mpr
+.endmacro
+
+;----------------------------------------------------------------
+; Desc: updates the countdown indicator LEDs to match the 
+;		countdown indicator register.
+;----------------------------------------------------------------
+.macro update_countdown_indicator
+	cpi countdown_indicator_r, 4
+	breq update_countdown_indicator_4
+	cpi countdown_indicator_r, 3
+	breq update_countdown_indicator_3
+	cpi countdown_indicator_r, 2
+	breq update_countdown_indicator_2
+	cpi countdown_indicator_r, 1
+	breq update_countdown_indicator_1
+	cpi countdown_indicator_r, 0
+	breq update_countdown_indicator_0
+
+	update_countdown_indicator_4:
+		set_countdown_indicator countdown_indicator_equal_4
+		rjmp update_countdown_indicator_return
+	update_countdown_indicator_3:
+		set_countdown_indicator countdown_indicator_equal_3
+		rjmp update_countdown_indicator_return
+	update_countdown_indicator_2:
+		set_countdown_indicator countdown_indicator_equal_2
+		rjmp update_countdown_indicator_return
+	update_countdown_indicator_1:
+		set_countdown_indicator countdown_indicator_equal_1
+		rjmp update_countdown_indicator_return
+	update_countdown_indicator_0:
+		set_countdown_indicator countdown_indicator_equal_0
+		rjmp update_countdown_indicator_return
+
+	update_countdown_indicator_return:
+		nop
 .endmacro
 
 ;----------------------------------------------------------------
@@ -167,6 +206,9 @@
 .org $0032
 	rcall uart1_receive_isr
 	reti
+.org $0022
+	rcall timer1_compare_match_A_isr
+	reti
 .org $0056			; End of Interrupt Vectors
 
 
@@ -236,20 +278,62 @@ init:
 
 	; Initialize Timer1
 	;-----
+	;Set Timer1 normal mode
+	ldi mpr, 0
+	sts	TCCR1A, mpr
+
+	; Set Timer1 prescaler to 1024
+	ldi mpr, (1 << CS12)| (1<< CS10)		
+	sts TCCR1B, mpr
+
+	; Enable interupt for Compare-Match-A
+	ldi	mpr, (1<< OCIE1A)
+	sts TIMSK1, mpr
+	
+	; Initialize Compare-Register-A
+	ldi	mpr, high(11718)
+	sts	OCR1AH, mpr
+	ldi	mpr, low(11718)
+	sts	OCR1AL, mpr
+
+	; Zero Timer1
+	ldi	mpr, 0
+	sts	TCNT1H, mpr
+	sts	TCNT1L, mpr
+
+	; Clear Countdown Indicator
+	clr countdown_indicator_r
 
 	; Enable Interrupts
+	;-----
 	sei
 
 main:
 	; set default game state for local and remote
 	clr local_game_state_r
 	clr remote_game_state_r
+	transmit_local_game_state
 
 	rcall welcome_state
+	transmit_local_game_state
 
 	rcall wait_state
+	transmit_local_game_state
 
 	rcall start_state
+	transmit_local_game_state
+	; BUG-PATCH: This is super gross but transmitting is unreliable. After 
+	; 100 transmitts, there is a high probability that the local game
+	; state is stored correctly on the other device
+	; BETTER SOLUTION: Consider changing the uart transmition/receive to implement
+	; a reliable data transfer. Use error checking and an ACK/NACK scheme. Then 
+	; refactor state transitions to block until remote has confirmed it correctly 
+	; received the transmitted message
+	ldi mpr, 100
+	temp:
+		transmit_local_game_state
+		dec mpr
+		brne temp
 
 	rcall player_choice_state
 
@@ -265,13 +349,14 @@ welcome_state:
 	const_copy_prog_to_data_16 32, WELCOME_STRING, lcd_buffer_address_start_line_1
 	rcall LCDWrite
 
+	; block until button is pressed
 	welcome_state_await_button_press:
-		transmit_local_game_state
 		sbic button_pinx, button_ready_bit
 		rjmp welcome_state_await_button_press
 	
 	; update local game state
 	sbr local_game_state_r, (1<<game_state_ready_bit)
+
 	pop mpr
 	ret
 
@@ -281,7 +366,6 @@ wait_state:
 	rcall LCDWrite
 
 	wait_state_await_remote_ready:
-		transmit_local_game_state
 		sbrs remote_game_state_r, game_state_ready_bit
 		rjmp wait_state_await_remote_ready
 
@@ -295,6 +379,10 @@ start_state:
 	; write wait message to lcd
 	const_copy_prog_to_data_16 32, START_STRING, lcd_buffer_address_start_line_1
 	rcall LCDWrite
+
+	; initialize the 6 second timer
+	ldi countdown_indicator_r, 4		; countdown_indicator_r * 1.5 seconds
+	update_countdown_indicator
 
 	start_state_await_timer_expire:
 		; on button press, change local game state
@@ -332,38 +420,36 @@ start_state:
 			rjmp start_state_finished_move_change
 
 		start_state_finished_move_change:
-			transmit_local_game_state
-
 			display_game_state local_game_state_r, lcd_buffer_address_start_line_2
 
-			; <<< DELETE ME ONCE TIMER IMPLEMENTED
-			sbic button_pinx, button_test2_bit
-			; <<< DELETE ME ONCE TIMER IMPLEMENTED
+			cpi countdown_indicator_r, 0
+			breq start_state_return
+
 			rjmp start_state_await_timer_expire
 
-	; transmit move again after its finaly selected
-	transmit_local_game_state
-
-	pop XH
-	pop XL
-	pop mpr
-	ret
+	start_state_return:
+		pop XH
+		pop XL
+		pop mpr
+		ret
 
 player_choice_state:
-	player_choice_state_await_timer_expire:
-		; ensure that remote has correct game state
-		transmit_local_game_state
+	; initialize the 6 second timer
+	ldi countdown_indicator_r, 4		; countdown_indicator_r * 1.5 seconds
+	update_countdown_indicator
 
+	player_choice_state_await_timer_expire:
 		; update display with selected values
 		display_game_state local_game_state_r, lcd_buffer_address_start_line_2
 		display_game_state remote_game_state_r, lcd_buffer_address_start_line_1
 
-		; <<< DELETE ME ONCE TIMER IMPLEMENTED
-		sbic button_pinx, button_test1_bit
-		; <<< DELETE ME ONCE TIMER IMPLEMENTED
+		cpi countdown_indicator_r, 0
+		breq player_choice_state_return
+
 		rjmp player_choice_state_await_timer_expire
 
-	ret
+	player_choice_state_return:
+		ret
 
 outcome_state:
 	push mpr
@@ -408,25 +494,31 @@ outcome_state:
 	outcome_state_tie:
 		const_copy_prog_to_data_16 16, TIE_STRING, lcd_buffer_address_start_line_1
 		rcall LCDWrite
-		rjmp outcome_state_await_timer_expire
+		rjmp outcome_state_timer
 	outcome_state_win:
 		const_copy_prog_to_data_16 16, WIN_STRING, lcd_buffer_address_start_line_1
 		rcall LCDWrite
-		rjmp outcome_state_await_timer_expire
+		rjmp outcome_state_timer
 	outcome_state_loose:
 		const_copy_prog_to_data_16 16, LOOSE_STRING, lcd_buffer_address_start_line_1
 		rcall LCDWrite
-		rjmp outcome_state_await_timer_expire
+		rjmp outcome_state_timer
 	
-	outcome_state_await_timer_expire:
-		; <<< DELETE ME ONCE TIMER IMPLEMENTED
-		sbic button_pinx, button_test2_bit
-		; <<< DELETE ME ONCE TIMER IMPLEMENTED
-		rjmp outcome_state_await_timer_expire
+	outcome_state_timer:
+		; initialize the 6 second timer
+		ldi countdown_indicator_r, 4		; countdown_indicator_r * 1.5 seconds
+		update_countdown_indicator
 
-pop r17
-pop mpr
-ret
+		outcome_state_await_timer_expire:
+			cpi countdown_indicator_r, 0
+			breq outcome_state_return
+
+			rjmp outcome_state_await_timer_expire
+
+	outcome_state_return:
+		pop r17
+		pop mpr
+		ret
 
 ;***********************************************************
 ; Desc:  Transmits the data stored in mpr over uart1. Blocks
@@ -455,38 +547,42 @@ uart1_transmit:
 	pop mpr
 	ret
 
-;***********************************************************
+;----------------------------------------------------------------
 ; Desc:  The isr for receive on uart1. Updates 
 ;		 remote_game_state_r with data sent.
-;***********************************************************
+;----------------------------------------------------------------
 uart1_receive_isr:
 	push mpr
 	push r17
 			
 	lds	remote_game_state_r, UDR1
 
-	/*uart1_receive_isr_read_buffer:
-		lds	remote_game_state_r, UDR1
-		lds mpr, UCSR1A
-		sbrc mpr, 7
-		rjmp uart1_receive_isr_read_buffer
-	
-	mov r17, remote_game_state_r
-	clc
-	rol r17
-	rol r17
-	rol r17
-	rol r17
-
-	in mpr, countdown_indicator_portx
-	andi mpr, ~(countdown_indicator_mask)	; clear countdown indicator
-	or mpr, r17
-	sbr mpr, 1<<4
-	out countdown_indicator_portx, mpr*/
-
 	pop r17
 	pop mpr
 	ret
+
+;----------------------------------------------------------------
+; Desc:  The isr for timer1 compare match A.
+;----------------------------------------------------------------
+timer1_compare_match_A_isr:
+	push mpr
+
+	cpi countdown_indicator_r, 0
+	breq timer_compare_match_A_isr_return
+
+	dec countdown_indicator_r
+	update_countdown_indicator
+	
+	timer_compare_match_A_isr_return:
+		update_countdown_indicator
+
+		; Zero the counter
+		ldi mpr, 0
+		sts TCNT1H, mpr
+		sts	TCNT1L, mpr
+
+		pop mpr
+		ret
 
 ;----------------------------------------------------------------
 ; Func:		Wait
