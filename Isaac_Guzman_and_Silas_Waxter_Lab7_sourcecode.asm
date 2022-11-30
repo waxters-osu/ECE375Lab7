@@ -1,14 +1,20 @@
+;----------------------------------------------------------------
 ;
-; Lab7.asm
+; The lab 7 final project. A two-player rock-paper-scissors game
+; between two AVR boards which communicate over UART.
 ;
-; Created: 11/16/2022 2:24:24 PM
-; Author : Isaac Guzman & Silas Waxter
+;	 Author: Silas Waxter and Isaac Guzman
+;	   Date: 11/16/2022
 ;
+;----------------------------------------------------------------
 ;***********************************************************
 ;*	Internal Register Definitions and Constants
 ;***********************************************************
+.include "m32U4def.inc"
+
 .def mpr = r16
-.def wait_count_r = r17			; wait function parameter
+
+.def wait_count_r = r17
 .def wait_inner_loop_r = r18
 .def wait_outter_loop_r = r19
 
@@ -107,9 +113,15 @@
 ;***********************************************************
 .org $0000
 	rjmp init
-.org $0056						; End of Interrupt Vectors
+.org $003C
+	rjmp uart1_receive_isr
+	reti
+.org $0056			; End of Interrupt Vectors
 
 
+;***********************************************************
+;*  Program Initialization
+;***********************************************************
 init:
 	; Initialize the stack pointer.
 	;-----
@@ -125,6 +137,7 @@ init:
 	;       code. It may ease debugging.
 	;--------------------------------------------------------
 	; Initialize LCD Display
+	;-----
 	rcall LCDInit
 	rcall LCDBacklightOn
 	rcall LCDClr
@@ -154,6 +167,27 @@ init:
 	out button_portx, mpr
 	; <<< DELETE ME ONCE TESTING IS COMPLETE
 
+	; Initialize UART1
+	;-----
+	ldi	mpr, high(207)
+	sts	UBRR1H,mpr
+
+	ldi	mpr, low(207)
+	sts	UBRR1L,mpr
+
+	;Enable receiver and transmitter
+	ldi	mpr, (1<<RXEN1)|(1<<TXEN1)|(1<<RXCIE1)|(0<<UCSZ12)
+	sts	UCSR1B, mpr
+
+	;Set frame format: 8 data bits, 2 stop bits
+	ldi	mpr, (0<<UMSEL11)|(0<<UMSEL10)|(0<<UPM11)|(0<<UPM10)|(1<<USBS1)|(1<<UCSZ11)|(1<<UCSZ10)|(0<<UCPOL1)
+	sts	UCSR1C, mpr
+
+	; Initialize Timer1
+	;-----
+
+	; Program Initialization
+	;-----
 	clr local_game_state_r
 	clr remote_game_state_r
 
@@ -161,14 +195,16 @@ init:
 	ldi remote_game_state_r, (1<<game_state_paper_bit)
 	; <<< DELETE ME ONCE TESTING IS COMPLETE
 
-	; Initialize USART1
-	;-----
-
-	; Initialize Timer1
-	;-----
+	; Enable Interrupts
+	sei
 
 main:
 	set_countdown_indicator countdown_indicator_equal_4
+
+	; <<< DELETE ME ONCE TESTING IS COMPLETE
+	ldi mpr, 1<<game_state_ready_bit
+	rcall uart1_transmit
+	; <<< DELETE ME ONCE TESTING IS COMPLETE
 
 	rcall welcome_state
 
@@ -375,6 +411,56 @@ outcome_state:
 pop r17
 pop r16
 ret
+
+;***********************************************************
+; Desc:  Transmits the data stored in mpr over uart1. Blocks
+;		 until prior transmit is completed and transmit
+;        buffer is empty.
+; Param: mpr = data to transmit
+;***********************************************************
+uart1_transmit:
+	push mpr
+	push r17
+
+	; copy the data to transmit
+	mov r17, mpr
+		
+	uart1_transmit_await_empty_transmit_buffer:
+		; Wait for empty transmit buffer
+		lds mpr, UCSR1A
+		andi mpr, 1<<UDRE1
+		cpi mpr, 1<<UDRE1
+		brne uart1_transmit_await_empty_transmit_buffer
+	
+	; transmit data
+	sts	UDR1, r17
+
+	pop r17
+	pop mpr
+	ret
+
+;***********************************************************
+; Desc:  The isr for receive on uart1.
+;***********************************************************
+uart1_receive_isr:
+	push mpr
+
+	lds	mpr, UDR1			;Load in message from other board (ready, Input, etc.)
+
+	cpi mpr, 1<<game_state_ready_bit
+	breq receive_good
+
+	receive_bad:
+		set_countdown_indicator countdown_indicator_equal_2
+		rjmp recieve_return
+
+	receive_good:
+		set_countdown_indicator countdown_indicator_equal_1
+		rjmp recieve_return
+	
+	recieve_return:
+		pop	mpr
+		ret
 
 ;----------------------------------------------------------------
 ; Func:		Wait
