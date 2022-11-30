@@ -27,11 +27,11 @@
 ; Holds the game state of both players.
 .def remote_game_state_r = r23
 .def local_game_state_r = r24
-.equ game_state_ready_bit = 4
 ; NOTE: outcome of game is based on this specific bit order of moves
-.equ game_state_rock_bit = 1
-.equ game_state_paper_bit = 2
-.equ game_state_scissors_bit = 3
+.equ game_state_rock_bit = 0
+.equ game_state_paper_bit = 1
+.equ game_state_scissors_bit = 2
+.equ game_state_ready_bit = 3
 
 ; Describe the LEDs used for the countdown indicator. 
 .equ countdown_indicator_ddrx = DDRB
@@ -102,6 +102,57 @@
 	rcall copy_prog_to_data_16
 
 	pop mpr
+.endmacro
+
+;----------------------------------------------------------------
+; Desc: Transmit the local game state to remote player. The purpose 
+;		is a label for this repeated behavior that does not need a
+;		unique subroutine.
+;----------------------------------------------------------------
+.macro transmit_local_game_state
+	push mpr
+
+	mov mpr, local_game_state_r
+	rcall uart1_transmit
+
+	pop mpr
+.endmacro
+
+;----------------------------------------------------------------
+; Desc: Display the game state on the lcd based based on its setting
+; Ex:	`display_game_state local_game_state_r lcd_buffer_address_start_line_1`
+; Param:
+;		@0 = register containing game state
+;		@1 = lcd buffer start address for line
+;----------------------------------------------------------------
+.macro display_game_state
+	sbrc @0, game_state_rock_bit
+	rjmp display_game_state_rock
+
+	sbrc @0, game_state_paper_bit
+	rjmp display_game_state_paper
+
+	sbrc @0, game_state_scissors_bit
+	rjmp display_game_state_scissors
+
+	; if execution reaches this point, invalid game state for move
+	const_copy_prog_to_data_16 16, EMPTY_STRING, @1
+	rjmp display_game_state_display
+
+	display_game_state_rock:	
+		const_copy_prog_to_data_16 16, ROCK_STRING, @1	
+		rjmp display_game_state_display
+
+	display_game_state_paper:
+		const_copy_prog_to_data_16 16, PAPER_STRING, @1	
+		rjmp display_game_state_display
+
+	display_game_state_scissors:
+		const_copy_prog_to_data_16 16, SCISSORS_STRING, @1	
+		rjmp display_game_state_display
+
+	display_game_state_display:
+		rcall LCDWrite
 .endmacro
 ;***********************************************************
 ;*  Start of Code Segment
@@ -186,25 +237,13 @@ init:
 	; Initialize Timer1
 	;-----
 
-	; Program Initialization
-	;-----
-	clr local_game_state_r
-	clr remote_game_state_r
-
-	; <<< DELETE ME ONCE TESTING IS COMPLETE
-	ldi remote_game_state_r, (1<<game_state_paper_bit)
-	; <<< DELETE ME ONCE TESTING IS COMPLETE
-
 	; Enable Interrupts
 	sei
 
 main:
-	set_countdown_indicator countdown_indicator_equal_4
-
-	; <<< DELETE ME ONCE TESTING IS COMPLETE
-	ldi mpr, 1<<game_state_ready_bit
-	rcall uart1_transmit
-	; <<< DELETE ME ONCE TESTING IS COMPLETE
+	; set default game state for local and remote
+	clr local_game_state_r
+	clr remote_game_state_r
 
 	rcall welcome_state
 
@@ -216,46 +255,39 @@ main:
 
 	rcall outcome_state
 
-	rcall LCDClr
+	;rcall LCDClr
 	rjmp main
 
 ; displays welcome message and blocks until button is pressed
 welcome_state:
 	push mpr
 
-	; copy welcome message to lcd buffer
+	; write welcome message to lcd
 	const_copy_prog_to_data_16 32, WELCOME_STRING, lcd_buffer_address_start_line_1
-
-	; synchronize LCD with its buffer
 	rcall LCDWrite
 
 	welcome_state_await_button_press:
 		sbic button_pinx, button_ready_bit
 		rjmp welcome_state_await_button_press
 	
-	;ldi local_game_state_r, (1<<game_state_ready_bit)
 	pop mpr
 	ret
 
 wait_state:
-	push mpr
-
-	; copy wait message to lcd buffer
+	; write wait message to lcd
 	const_copy_prog_to_data_16 32, WAIT_STRING, lcd_buffer_address_start_line_1
-
-	; synchronize LCD with its buffer
 	rcall LCDWrite
 
-	; block until receive opponenet ready message
+	; update local game state
+	sbr local_game_state_r, (1<<game_state_ready_bit)
+
 	wait_state_await_remote_ready:
-		cpi remote_game_state_r, game_state_ready_bit
-		; TODO: send ready message to remote using UART Transmitt
-		; <<< DELETE ME ONCE UART ISR IMPLEMENTED
-		sbic button_pinx, button_test1_bit
-		; <<< DELETE ME ONCE UART ISR IMPLEMENTED
+		; continously transmit in case errors occured on first transmission
+		transmit_local_game_state
+
+		sbrs remote_game_state_r, game_state_ready_bit
 		rjmp wait_state_await_remote_ready
-	
-	pop mpr
+
 	ret
 
 start_state:
@@ -263,53 +295,50 @@ start_state:
 	push XL
 	push XH
 
-	; copy wait message to lcd buffer
+	; write wait message to lcd
 	const_copy_prog_to_data_16 32, START_STRING, lcd_buffer_address_start_line_1
-
-	; synchronize LCD with its buffer
 	rcall LCDWrite
 
-	; block until timer expires
 	start_state_await_timer_expire:
-		; continously poll button. once pressed change move state to next
-		in mpr, button_pinx
+		; on button press, change local game state
 		sbic button_pinx, button_move_bit
 		rjmp start_state_finished_move_change
-
 		debounce_button
 
-		; if game state doesn't have a move set, set it to rock
-		mov mpr, local_game_state_r
-		andi mpr, (1<<game_state_rock_bit | 1<<game_state_paper_bit | 1<<game_state_scissors_bit)
-		breq start_state_set_rock
-		; branch to set next move based on currently set move
-		cpi local_game_state_r, 1<<game_state_rock_bit
-		breq start_state_set_paper
-		cpi local_game_state_r, 1<<game_state_paper_bit
-		breq start_state_set_scissors
-		cpi local_game_state_r, 1<<game_state_scissors_bit
-		breq start_state_set_rock  
+		; goto next move if currently set to rock or paper.
+		; when not set or set to scissors, set to rock
+		sbrc local_game_state_r, game_state_rock_bit
+		rjmp start_state_set_paper
+
+		sbrc local_game_state_r, game_state_paper_bit
+		rjmp start_state_set_scissors
 			
 		start_state_set_rock:
-			ldi local_game_state_r, 1<<game_state_rock_bit
-			const_copy_prog_to_data_16 16, ROCK_STRING, lcd_buffer_address_start_line_2
-			rcall LCDWrite
+			; clear rock-paper-scissors bits
+			cbr local_game_state_r, (1<<game_state_rock_bit | 1<<game_state_paper_bit | 1<<game_state_scissors_bit)
+			; set rock bit
+			sbr local_game_state_r, 1<<game_state_rock_bit
 			rjmp start_state_finished_move_change
 
 		start_state_set_paper:
-			ldi local_game_state_r, 1<<game_state_paper_bit
-			const_copy_prog_to_data_16 16, PAPER_STRING, lcd_buffer_address_start_line_2
-			rcall LCDWrite
+			; clear rock-paper-scissors bits
+			cbr local_game_state_r, (1<<game_state_rock_bit | 1<<game_state_paper_bit | 1<<game_state_scissors_bit)
+			; set paper bit
+			sbr local_game_state_r, 1<<game_state_paper_bit
 			rjmp start_state_finished_move_change
 
 		start_state_set_scissors:
-			ldi local_game_state_r, 1<<game_state_scissors_bit
-			const_copy_prog_to_data_16 16, SCISSORS_STRING, lcd_buffer_address_start_line_2
-			rcall LCDWrite
+			; clear rock-paper-scissors bits
+			cbr local_game_state_r, (1<<game_state_rock_bit | 1<<game_state_paper_bit | 1<<game_state_scissors_bit)
+			; set scissors bit
+			sbr local_game_state_r, 1<<game_state_scissors_bit
 			rjmp start_state_finished_move_change
 
 		start_state_finished_move_change:
-			; TODO: transmit chosen move over UART
+			transmit_local_game_state
+
+			display_game_state local_game_state_r, lcd_buffer_address_start_line_2
+
 			; <<< DELETE ME ONCE TIMER IMPLEMENTED
 			sbic button_pinx, button_test2_bit
 			; <<< DELETE ME ONCE TIMER IMPLEMENTED
@@ -321,33 +350,14 @@ start_state:
 	ret
 
 player_choice_state:
-	; conditional display of move based on remote's move choice
-	cpi remote_game_state_r, 1<<game_state_rock_bit
-	breq player_choice_state_display_remote_rock
-	cpi remote_game_state_r, 1<<game_state_paper_bit
-	breq player_choice_state_display_remote_paper
-	cpi remote_game_state_r, 1<<game_state_scissors_bit
-	breq player_choice_state_display_remote_scissors
-
-	;if execution reaches here, remote's move choice does not match move options: ERROR
-	const_copy_prog_to_data_16 16, ERROR_NO_MOVE_STRING, lcd_buffer_address_start_line_1
-	rcall LCDWrite
-	rjmp player_choice_state_await_timer_expire
-
-	player_choice_state_display_remote_rock:
-		const_copy_prog_to_data_16 16, ROCK_STRING, lcd_buffer_address_start_line_1
-		rcall LCDWrite
-		rjmp player_choice_state_await_timer_expire
-	player_choice_state_display_remote_paper:
-		const_copy_prog_to_data_16 16, PAPER_STRING, lcd_buffer_address_start_line_1
-		rcall LCDWrite
-		rjmp player_choice_state_await_timer_expire
-	player_choice_state_display_remote_scissors:
-		const_copy_prog_to_data_16 16, SCISSORS_STRING, lcd_buffer_address_start_line_1
-		rcall LCDWrite
-		rjmp player_choice_state_await_timer_expire
-
 	player_choice_state_await_timer_expire:
+		; ensure that remote has correct game state
+		transmit_local_game_state
+
+		; update display with selected values
+		display_game_state local_game_state_r, lcd_buffer_address_start_line_2
+		display_game_state remote_game_state_r, lcd_buffer_address_start_line_1
+
 		; <<< DELETE ME ONCE TIMER IMPLEMENTED
 		sbic button_pinx, button_test1_bit
 		; <<< DELETE ME ONCE TIMER IMPLEMENTED
@@ -377,14 +387,14 @@ outcome_state:
 	; to MSB within mask) of local game state bits is equal to remote.
 	ror r16							; since this is a copy of the actual game state, it doesn't
 									; matter if the carry bit gets propogated to register's MSB
-	brcc outcome_state_tie_clear_msb_mask
-	outcome_state_tie_set_msb_mask:
+	brcc outcome_state_winloose_clear_msb_mask
+	outcome_state_winloose_set_msb_mask:
 		sbr r16, game_state_scissors_bit
-		rjmp outcome_state_win_or_loose
-	outcome_state_tie_clear_msb_mask:
+		rjmp outcome_state_winloose
+	outcome_state_winloose_clear_msb_mask:
 		cbr r16, game_state_scissors_bit
-		rjmp outcome_state_win_or_loose
-	outcome_state_win_or_loose:
+		rjmp outcome_state_winloose
+	outcome_state_winloose:
 		cp r16, r17
 		breq outcome_state_win
 		brne outcome_state_loose
@@ -440,27 +450,20 @@ uart1_transmit:
 	ret
 
 ;***********************************************************
-; Desc:  The isr for receive on uart1.
+; Desc:  The isr for receive on uart1. Updates 
+;		 remote_game_state_r with data sent.
 ;***********************************************************
 uart1_receive_isr:
 	push mpr
-
-	lds	mpr, UDR1			;Load in message from other board (ready, Input, etc.)
-
-	cpi mpr, 1<<game_state_ready_bit
-	breq receive_good
-
-	receive_bad:
-		set_countdown_indicator countdown_indicator_equal_2
-		rjmp recieve_return
-
-	receive_good:
-		set_countdown_indicator countdown_indicator_equal_1
-		rjmp recieve_return
 	
-	recieve_return:
-		pop	mpr
-		ret
+	; TEST busy wait
+	ldi wait_count_r, 10
+	rcall wait
+
+	lds	remote_game_state_r, UDR1
+
+	pop	mpr
+	ret
 
 ;----------------------------------------------------------------
 ; Func:		Wait
@@ -520,8 +523,8 @@ WIN_STRING:
 .DB "You won!        "
 LOOSE_STRING:
 .DB "You lost!       "
-ERROR_NO_MOVE_STRING:
-.DB "ERROR NO MOVE   "
+EMPTY_STRING:
+.DB "                "
 
 ;***********************************************************
 ;*	Additional Program Includes
