@@ -22,11 +22,13 @@
 ; Holds the current countdown indicator. After changing this 
 ; value, the time remaining in the countdown is equal to 
 ; approximately 1.5*countdown_indicator_r seconds.
-.def countdown_indicator_r = r25
+; WARNING: THIS REGISTER IS A GLOBAL VARIABLE ACCESSED IN INTERRUPT
+;		   IT CANNOT BE USED IN SUBROUTINES EVEN WITH PUSH/POP
+.def countdown_indicator_r = r23
 
 ; Holds the game state of both players.
-.def remote_game_state_r = r23
-.def local_game_state_r = r24
+.def remote_game_state_r = r24
+.def local_game_state_r = r25
 ; NOTE: outcome of game is based on this specific bit order of moves
 .equ game_state_rock_bit = 0
 .equ game_state_paper_bit = 1
@@ -299,14 +301,14 @@ init:
 	sts	TCNT1H, mpr
 	sts	TCNT1L, mpr
 
+	; Clear Countdown Indicator
+	clr countdown_indicator_r
+
 	; Enable Interrupts
 	;-----
 	sei
 
 main:
-	ldi countdown_indicator_r, 4
-	update_countdown_indicator
-
 	; set default game state for local and remote
 	clr local_game_state_r
 	clr remote_game_state_r
@@ -362,6 +364,10 @@ start_state:
 	const_copy_prog_to_data_16 32, START_STRING, lcd_buffer_address_start_line_1
 	rcall LCDWrite
 
+	; initialize the 6 second timer
+	ldi countdown_indicator_r, 4		; countdown_indicator_r * 1.5 seconds
+	update_countdown_indicator
+
 	start_state_await_timer_expire:
 		; on button press, change local game state
 		sbic button_pinx, button_move_bit
@@ -402,18 +408,19 @@ start_state:
 
 			display_game_state local_game_state_r, lcd_buffer_address_start_line_2
 
-			; <<< DELETE ME ONCE TIMER IMPLEMENTED
-			sbic button_pinx, button_test2_bit
-			; <<< DELETE ME ONCE TIMER IMPLEMENTED
+			cpi countdown_indicator_r, 0
+			breq start_state_return
+
 			rjmp start_state_await_timer_expire
 
-	; transmit move again after its finaly selected
-	transmit_local_game_state
+	start_state_return:
+		; transmit move again after its finaly selected
+		transmit_local_game_state
 
-	pop XH
-	pop XL
-	pop mpr
-	ret
+		pop XH
+		pop XL
+		pop mpr
+		ret
 
 player_choice_state:
 	player_choice_state_await_timer_expire:
@@ -548,6 +555,8 @@ timer1_compare_match_A_isr:
 	update_countdown_indicator
 	
 	timer_compare_match_A_isr_return:
+		update_countdown_indicator
+
 		; Zero the counter
 		ldi mpr, 0
 		sts TCNT1H, mpr
