@@ -52,11 +52,6 @@
 .equ button_ready_bit = 7
 .equ button_move_bit = 4
 
-; <<< DELETE ME ONCE UART IS READY
-.equ button_test1_bit = 5
-.equ button_test2_bit = 6
-; <<< DELETE ME ONCE UART IS READY
-
 ;----------------------------------------------------------------
 ; Desc: debounce button wait method
 ;----------------------------------------------------------------
@@ -213,8 +208,12 @@
 
 
 ;***********************************************************
-;*  Program Initialization
+;*  Functions
 ;***********************************************************
+;----------------------------------------------------------------
+; Desc:  Application entrypoint. Initialize the peripherals and 
+;		 applicataion data.
+;----------------------------------------------------------------
 init:
 	; Initialize the stack pointer.
 	;-----
@@ -249,16 +248,6 @@ init:
 	in mpr, button_portx
 	sbr mpr, ((1<<button_ready_bit) | (1<<button_move_bit))
 	out button_portx, mpr
-
-	; <<< DELETE ME ONCE TESTING IS COMPLETE
-	; set buttons as inputs with pull-up enabled
-	in mpr, button_ddrx
-	cbr mpr, ((1<<button_test1_bit) | (1<<button_test2_bit))
-	out button_ddrx, mpr
-	in mpr, button_portx
-	sbr mpr, ((1<<button_test1_bit) | (1<<button_test2_bit))
-	out button_portx, mpr
-	; <<< DELETE ME ONCE TESTING IS COMPLETE
 
 	; Initialize UART1
 	;-----
@@ -308,8 +297,14 @@ init:
 	;-----
 	sei
 
+;----------------------------------------------------------------
+; Desc:  Application main loop. This application is a state 
+;		 machine where each state is function that continously
+;		 executes until its state transition is met--then it 
+;		 returns back to main which will call the next state.
+;----------------------------------------------------------------
 main:
-	; set default game state for local and remote
+	; Clear all game state for new game.
 	clr local_game_state_r
 	clr remote_game_state_r
 	transmit_local_game_state
@@ -341,7 +336,13 @@ main:
 
 	rjmp main
 
-; displays welcome message and blocks until button is pressed
+;----------------------------------------------------------------
+; Desc:  The first state of the application displays a welcome
+;		 message on the LCD and blocks until the ready button
+;		 is pressed.
+;
+;		 Changes local game state to ready.
+;----------------------------------------------------------------
 welcome_state:
 	push mpr
 
@@ -360,6 +361,10 @@ welcome_state:
 	pop mpr
 	ret
 
+;----------------------------------------------------------------
+; Desc:  This state displays the waiting message to the LCD and 
+;		 blocks until the remote device signals that its ready.
+;----------------------------------------------------------------
 wait_state:
 	; write wait message to lcd
 	const_copy_prog_to_data_16 32, WAIT_STRING, lcd_buffer_address_start_line_1
@@ -371,6 +376,16 @@ wait_state:
 
 	ret
 
+;----------------------------------------------------------------
+; Desc:  This state displays the game start message on the first
+;		 line of the LCD, and displays the active move choice 
+;		 which is "rock", "paper", or "scissors" on the second 
+;		 line of the LCD. The state transitions after a 6 second
+;		 countdown expires.
+;
+;		 Changes local game state to indicate move choice. The 
+;		 ready state bit is preserved.
+;----------------------------------------------------------------
 start_state:
 	push mpr
 	push XL
@@ -433,6 +448,12 @@ start_state:
 		pop mpr
 		ret
 
+;----------------------------------------------------------------
+; Desc:  This state displays the remote player's move on the 
+;		 first line of the LCD and the local player's move on the
+;		 second line of the LCD. The state transtitions after a 6 
+;		 second countdown expires
+;----------------------------------------------------------------
 player_choice_state:
 	; initialize the 6 second timer
 	ldi countdown_indicator_r, 4		; countdown_indicator_r * 1.5 seconds
@@ -451,6 +472,12 @@ player_choice_state:
 	player_choice_state_return:
 		ret
 
+;----------------------------------------------------------------
+; Desc:  This state determines and displays the game outcome,
+;		 that is win, loose, or tie, on the first line of the
+;		 LCD. The state transtitions after a 6 second countdown
+;		 expires
+;----------------------------------------------------------------
 outcome_state:
 	push mpr
 	push r17
@@ -520,12 +547,12 @@ outcome_state:
 		pop mpr
 		ret
 
-;***********************************************************
+;----------------------------------------------------------------
 ; Desc:  Transmits the data stored in mpr over uart1. Blocks
 ;		 until prior transmit is completed and transmit
 ;        buffer is empty.
 ; Param: mpr = data to transmit
-;***********************************************************
+;----------------------------------------------------------------
 uart1_transmit:
 	push mpr
 	push r17
@@ -562,7 +589,10 @@ uart1_receive_isr:
 	ret
 
 ;----------------------------------------------------------------
-; Desc:  The isr for timer1 compare match A.
+; Desc:  The isr for timer1 compare match A. If 
+;		 countdown_indicator_r is not 0, decrement it and display
+;		 the new value on countdown indicator LEDs. Zero Timer1
+;		 before returning.
 ;----------------------------------------------------------------
 timer1_compare_match_A_isr:
 	push mpr
@@ -585,14 +615,12 @@ timer1_compare_match_A_isr:
 		ret
 
 ;----------------------------------------------------------------
-; Func:		Wait
 ; Desc:		A wait loop that does nothing for approximately 
 ;			n*10ms where n is determined by the value stored in 
 ;			waitcnt_r.
 ;			The general equation for number of clock cycles 
 ;			consumed by this function is as follows:
 ;				(((((3*r18)-1+4)*r17)-1+4)*waitcnt)-1+16
-; Note:		No registers used by function are destroyed.
 ;----------------------------------------------------------------
 wait:
     push wait_count_r

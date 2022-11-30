@@ -5,6 +5,9 @@
 .equ	lcd_buffer_address_end_line_2 = 0x011F 
 
 ;-----------------------------------------------------------
+; Desc:		Copies an array of n-bytes specified by param #1
+;			from program memory specified by param #2 & #3 to
+;			data memory specified by param #4 & #5.
 ; Params:	These parameters should be on the stack the 
 ;			following order (in order of stack push):
 ;				1) length of array in bytes
@@ -12,14 +15,11 @@
 ;				3) upper-byte of 16-bit program memory addresss
 ;				4) lower-byte of 16-bit data memory addresss
 ;				5) upper-byte of 16-bit data memory addresss
-; Desc:		Copies an array of n-bytes specified by param #1
-;			from program memory specified by param #2 & #3 to
-;			data memory specified by param #4 & #5.
 ; NOTE:     Destroys contents of registers X, Y, and Z
 ;-----------------------------------------------------------
 copy_prog_to_data_16:
 	; pop return address off stack temporarily to access
-	; caller pushed data
+	; caller's pushed data
 	pop XH
 	pop XL
 
@@ -33,7 +33,8 @@ copy_prog_to_data_16:
 	; upper/lower byte of program memory--not apart of 
 	; program memory address.
 	; perform `<< 1` treating Z as 16 continous bits.
-	bclr 0		; clear the carry flag in status register
+	bclr 0		; clear carry-bit so that LSB will be 0 
+				; which is pointing at first byte in prog. mem.
 	rol ZL
 	rol ZH			
 
