@@ -167,6 +167,9 @@
 .org $0032
 	rcall uart1_receive_isr
 	reti
+.org $0022
+	rcall timer1_compare_match_A_isr
+	reti
 .org $0056			; End of Interrupt Vectors
 
 
@@ -236,8 +239,31 @@ init:
 
 	; Initialize Timer1
 	;-----
+	;Set Timer1 normal mode
+	ldi mpr, 0
+	sts	TCCR1A, mpr
+
+	; Set Timer1 prescaler to 1024
+	ldi mpr, (1 << CS12)| (1<< CS10)		
+	sts TCCR1B, mpr
+
+	; Enable interupt for Compare-Match-A
+	ldi	mpr, (1<< OCIE1A)
+	sts TIMSK1, mpr
+	
+	; Initialize Compare-Register-A
+	ldi	mpr, high(11718)
+	sts	OCR1AH, mpr
+	ldi	mpr, low(11718)
+	sts	OCR1AL, mpr
+
+	; Zero Timer1
+	ldi	mpr, 0
+	sts	TCNT1H, mpr
+	sts	TCNT1L, mpr
 
 	; Enable Interrupts
+	;-----
 	sei
 
 main:
@@ -455,10 +481,10 @@ uart1_transmit:
 	pop mpr
 	ret
 
-;***********************************************************
+;----------------------------------------------------------------
 ; Desc:  The isr for receive on uart1. Updates 
 ;		 remote_game_state_r with data sent.
-;***********************************************************
+;----------------------------------------------------------------
 uart1_receive_isr:
 	push mpr
 	push r17
@@ -466,6 +492,22 @@ uart1_receive_isr:
 	lds	remote_game_state_r, UDR1
 
 	pop r17
+	pop mpr
+	ret
+
+;----------------------------------------------------------------
+; Desc:  The isr for timer1 compare match A.
+;----------------------------------------------------------------
+timer1_compare_match_A_isr:
+	push mpr
+
+	set_countdown_indicator countdown_indicator_equal_4
+	
+	; Zero the counter
+	ldi mpr, 0
+	sts TCNT1H, mpr
+	sts	TCNT1L, mpr
+
 	pop mpr
 	ret
 
