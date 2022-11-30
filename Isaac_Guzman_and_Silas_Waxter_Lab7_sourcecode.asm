@@ -164,8 +164,8 @@
 ;***********************************************************
 .org $0000
 	rjmp init
-.org $003C
-	rjmp uart1_receive_isr
+.org $0032
+	rcall uart1_receive_isr
 	reti
 .org $0056			; End of Interrupt Vectors
 
@@ -220,17 +220,17 @@ init:
 
 	; Initialize UART1
 	;-----
+	; Set baudrate
 	ldi	mpr, high(207)
 	sts	UBRR1H,mpr
-
 	ldi	mpr, low(207)
 	sts	UBRR1L,mpr
 
-	;Enable receiver and transmitter
+	; Enable receiver and transmitter
 	ldi	mpr, (1<<RXEN1)|(1<<TXEN1)|(1<<RXCIE1)|(0<<UCSZ12)
 	sts	UCSR1B, mpr
 
-	;Set frame format: 8 data bits, 2 stop bits
+	; Set frame format: 8 data bits, 2 stop bits
 	ldi	mpr, (0<<UMSEL11)|(0<<UMSEL10)|(0<<UPM11)|(0<<UPM10)|(1<<USBS1)|(1<<UCSZ11)|(1<<UCSZ10)|(0<<UCPOL1)
 	sts	UCSR1C, mpr
 
@@ -255,7 +255,6 @@ main:
 
 	rcall outcome_state
 
-	;rcall LCDClr
 	rjmp main
 
 ; displays welcome message and blocks until button is pressed
@@ -267,9 +266,12 @@ welcome_state:
 	rcall LCDWrite
 
 	welcome_state_await_button_press:
+		transmit_local_game_state
 		sbic button_pinx, button_ready_bit
 		rjmp welcome_state_await_button_press
 	
+	; update local game state
+	sbr local_game_state_r, (1<<game_state_ready_bit)
 	pop mpr
 	ret
 
@@ -278,13 +280,8 @@ wait_state:
 	const_copy_prog_to_data_16 32, WAIT_STRING, lcd_buffer_address_start_line_1
 	rcall LCDWrite
 
-	; update local game state
-	sbr local_game_state_r, (1<<game_state_ready_bit)
-
 	wait_state_await_remote_ready:
-		; continously transmit in case errors occured on first transmission
 		transmit_local_game_state
-
 		sbrs remote_game_state_r, game_state_ready_bit
 		rjmp wait_state_await_remote_ready
 
@@ -344,6 +341,9 @@ start_state:
 			; <<< DELETE ME ONCE TIMER IMPLEMENTED
 			rjmp start_state_await_timer_expire
 
+	; transmit move again after its finaly selected
+	transmit_local_game_state
+
 	pop XH
 	pop XL
 	pop mpr
@@ -366,36 +366,42 @@ player_choice_state:
 	ret
 
 outcome_state:
-	push r16
+	push mpr
 	push r17
 
-	; Copy the game state to working registers
-	mov r16, local_game_state_r
+	; Copy the game state to working registers (game state register must not be mpr-r17
+	mov mpr, local_game_state_r
 	mov r17, remote_game_state_r
 
 	; Mask out all state except move choices
-	andi r16, (1<<game_state_rock_bit | 1<<game_state_paper_bit | 1<<game_state_scissors_bit)
+	andi mpr, (1<<game_state_rock_bit | 1<<game_state_paper_bit | 1<<game_state_scissors_bit)
 	andi r17, (1<<game_state_rock_bit | 1<<game_state_paper_bit | 1<<game_state_scissors_bit)
 
 	; Check for tie
-	cp r16, r17
+	cp mpr, r17
 	breq outcome_state_tie
 
 	; Check for win/loose
-	; This implementation is dependent on the specific bit pattern
-	; defined: Local won if the right shifted bits (with LSB within mask
-	; to MSB within mask) of local game state bits is equal to remote.
-	ror r16							; since this is a copy of the actual game state, it doesn't
-									; matter if the carry bit gets propogated to register's MSB
-	brcc outcome_state_winloose_clear_msb_mask
-	outcome_state_winloose_set_msb_mask:
-		sbr r16, game_state_scissors_bit
-		rjmp outcome_state_winloose
-	outcome_state_winloose_clear_msb_mask:
-		cbr r16, game_state_scissors_bit
-		rjmp outcome_state_winloose
-	outcome_state_winloose:
-		cp r16, r17
+	; This implementation is dependent on the specific bit pattern defined:
+	; The local player won if the move state bits rolled to the right such that all bits are 
+	; shifted one place to the right and LSB of the move state replaces the MSB of the move state.
+	; If the local player neither tied nor won, it loss
+	;-----
+	ror mpr
+	brcs outcome_state_set_msb_move_bit
+	brcc outcome_state_clear_lsb_move_bit
+	outcome_state_set_msb_move_bit:
+		sbr mpr, 1<<game_state_scissors_bit
+		rjmp outcome_state_determine_win
+	outcome_state_clear_lsb_move_bit:
+		cbr mpr, 1<<game_state_scissors_bit
+		rjmp outcome_state_determine_win
+
+	outcome_state_determine_win:
+		; Mask out all state except move choices
+		andi mpr, (1<<game_state_rock_bit | 1<<game_state_paper_bit | 1<<game_state_scissors_bit)
+
+		cp mpr, r17
 		breq outcome_state_win
 		brne outcome_state_loose
 
@@ -419,7 +425,7 @@ outcome_state:
 		rjmp outcome_state_await_timer_expire
 
 pop r17
-pop r16
+pop mpr
 ret
 
 ;***********************************************************
@@ -455,14 +461,31 @@ uart1_transmit:
 ;***********************************************************
 uart1_receive_isr:
 	push mpr
-	
-	; TEST busy wait
-	ldi wait_count_r, 10
-	rcall wait
-
+	push r17
+			
 	lds	remote_game_state_r, UDR1
 
-	pop	mpr
+	/*uart1_receive_isr_read_buffer:
+		lds	remote_game_state_r, UDR1
+		lds mpr, UCSR1A
+		sbrc mpr, 7
+		rjmp uart1_receive_isr_read_buffer
+	
+	mov r17, remote_game_state_r
+	clc
+	rol r17
+	rol r17
+	rol r17
+	rol r17
+
+	in mpr, countdown_indicator_portx
+	andi mpr, ~(countdown_indicator_mask)	; clear countdown indicator
+	or mpr, r17
+	sbr mpr, 1<<4
+	out countdown_indicator_portx, mpr*/
+
+	pop r17
+	pop mpr
 	ret
 
 ;----------------------------------------------------------------
