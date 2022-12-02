@@ -10,5 +10,4 @@ State transitions occur based on user input, remote game state, and timeouts.
 Communication between devices is via a UART connection. See the video below for
 a demonstration and explanation.
 
-video::777461409[vimeo,opts="loop"]
-
+https://vimeo.com/manage/videos/777461409
