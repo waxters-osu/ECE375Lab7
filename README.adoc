@@ -1,0 +1,14 @@
+:doctype: article
+
+= About
+
+A rock-paper-scissors game for two AVR ATMega32U4 boards. The program is 
+written in assembly, for the term project of OSU's _Computer Organization and 
+Assembly_ class. The program is designed using a finite state machine where
+both the local and remote (other player's) game state is tracked independently.
+State transitions occur based on user input, remote game state, and timeouts.
+Communication between devices is via a UART connection. See the video below for
+a demonstration and explanation.
+
+video::777461409[vimeo,opts="loop"]
+
